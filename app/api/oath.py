@@ -37,4 +37,4 @@ def get_current_user_id(db: Session = Depends(get_db), token: str = Depends(oaut
     user = db.query(Users).filter(Users.email == token_data.name).first()
     if user is None:
         raise credentials_exception
-    return user
+    return user.id

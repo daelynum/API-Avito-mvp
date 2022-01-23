@@ -16,6 +16,10 @@ app.include_router(admin.router)
 
 @app.post('/login', tags=['Login'])
 def login(request: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """
+    login route
+    """
+
     user = db.query(Users).filter(Users.email == request.username).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,

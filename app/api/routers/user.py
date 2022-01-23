@@ -49,16 +49,20 @@ async def create_announcement(price: float = Form(...), category_id: int = Form(
         - **email** is unique.
         - **mobile_phone** is unique.
     """
-    new_announcement = models.Announcements(
-        user_id=current_user_id,
-        price=price,
-        category_id=category_id,
-        text=text,
-        town_id=town_id
-    )
-    db.add(new_announcement)
-    db.commit()
-    db.refresh(new_announcement)
+    try:
+        new_announcement = models.Announcements(
+            user_id=current_user_id,
+            price=price,
+            category_id=category_id,
+            text=text,
+            town_id=town_id
+        )
+        db.add(new_announcement)
+        db.commit()
+        db.refresh(new_announcement)
+    except IntegrityError:
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                             detail='category_id or town_id doesnt exist')
 
     for file in files:
         parts = ["data", file.filename]
@@ -90,19 +94,21 @@ def update_announcement(announcement_id: int, request: schemas.Announcement_sche
         'town_id': request.town_id
     }, synchronize_session='evaluate')
     db.commit()
-    return {'data': f'Anouncement with id№{announcement_id} successfully updated'}
+    return {'data': f'Announcement with id {announcement_id} successfully updated'}
 
 
 @router.get('/announcements', response_model=List[schemas.Announcement_schema_response], status_code=status.HTTP_200_OK,
             tags=['Users'])
-def show_all_announcements(db: Session = Depends(database.get_db)):
+def show_all_announcements(db: Session = Depends(database.get_db),
+                        current_user: models.Users = Depends(oath.get_current_user_id)):
     return db.query(models.Announcements).all()
 
 
 @router.get('/announcements/{announcement_id}', response_model=schemas.Announcement_schema_response,
             status_code=status.HTTP_200_OK,
             tags=['Users'])
-def show_announcement(announcement_id: int, db: Session = Depends(database.get_db)):
+def show_announcement(announcement_id: int, db: Session = Depends(database.get_db),
+                        current_user: models.Users = Depends(oath.get_current_user_id)):
     announcement = db.query(models.Announcements).filter(models.Announcements.id == announcement_id).first()
     if not announcement:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
@@ -113,7 +119,8 @@ def show_announcement(announcement_id: int, db: Session = Depends(database.get_d
 @router.get('/announcements/user/{user_id}', response_model=List[schemas.Announcement_schema_response],
             status_code=status.HTTP_200_OK,
             tags=['Users'])
-def show_announcements_of_the_user(user_id: int, db: Session = Depends(database.get_db)):
+def show_announcements_of_the_user(user_id: int, db: Session = Depends(database.get_db),
+                        current_user: models.Users = Depends(oath.get_current_user_id)):
     announcement = db.query(models.Announcements).filter(models.Announcements.user_id == user_id).all()
     if not announcement:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
@@ -123,7 +130,8 @@ def show_announcements_of_the_user(user_id: int, db: Session = Depends(database.
 
 @router.get('/announcements/town/{town_id}',
             status_code=status.HTTP_200_OK, response_model=List[schemas.Announcement_schema_response], tags=['Users'])
-def show_announcements_towns_filtered(town_id: int, db: Session = Depends(database.get_db)):
+def show_announcements_towns_filtered(town_id: int, db: Session = Depends(database.get_db),
+                        current_user: models.Users = Depends(oath.get_current_user_id)):
     town = db.query(models.Announcements).filter(models.Announcements.town_id == town_id).all()
 
     if not town:
@@ -135,7 +143,8 @@ def show_announcements_towns_filtered(town_id: int, db: Session = Depends(databa
 @router.get('/announcements/category/{category_id}', response_model=List[schemas.Announcement_schema_response],
             status_code=status.HTTP_200_OK,
             tags=['Users'])
-def show_announcements_category_filtered(category_id: int, db: Session = Depends(database.get_db)):
+def show_announcements_category_filtered(category_id: int, db: Session = Depends(database.get_db),
+                        current_user: models.Users = Depends(oath.get_current_user_id)):
     category = db.query(models.Announcements).filter(models.Announcements.category_id == category_id).all()
     if not category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
@@ -185,16 +194,22 @@ def delete_announcement(announcement_id: int, db: Session = Depends(database.get
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f'Announcement with id {announcement_id} not found')
-    for file in removable_files:
-        remove(file.data_path)
-    db.query(models.Announcements).filter(models.Announcements.id == announcement_id).delete(synchronize_session=False)
-    db.commit()
+    try:
+        for file in removable_files:
+            remove(file.data_path)
+        db.query(models.Announcements).filter(models.Announcements.id == announcement_id).delete(synchronize_session=False)
+        db.commit()
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='file not found')
     return {'detail': f'обьявление с ID {announcement_id} удалено'}
 
 
 @router.get('/announcements/search/{word}', response_model=List[schemas.Announcement_schema_response], tags=['Users'])
-def search(word: str, db: Session = Depends(database.get_db)):
+def search(word: str, db: Session = Depends(database.get_db),
+                        current_user: models.Users = Depends(oath.get_current_user_id)):
     search_regex = f"%{word}%"
     exact_match = db.query(models.Announcements).filter(models.Announcements.text == word).all()
     like_match = db.query(models.Announcements).filter(models.Announcements.text.like(search_regex)).all()
+    if not exact_match or like_match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Announcements with similar word not found')
     return exact_match or like_match
